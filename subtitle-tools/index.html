@@ -452,16 +452,24 @@
         <h2 id="aiModalTitle">&#9881; AI Configuration</h2>
 
         <div class="modal-field">
-            <label for="aiApiKey">Gemini API Key</label>
+            <label for="aiProvider">AI Provider</label>
+            <select id="aiProvider">
+                <option value="gemini">Google Gemini</option>
+                <option value="openai">OpenAI</option>
+            </select>
+        </div>
+
+        <div class="modal-field">
+            <label for="aiApiKey" id="aiApiKeyLabel">API Key</label>
             <div class="key-row">
-                <input type="password" id="aiApiKey" placeholder="AIza..." autocomplete="off">
+                <input type="password" id="aiApiKey" placeholder="AIza…" autocomplete="off">
                 <button class="toggle-key" id="toggleKeyBtn" type="button">Show</button>
             </div>
         </div>
 
         <div class="modal-field">
             <label for="aiModel">Model</label>
-            <div class="key-row">
+            <div class="key-row" id="aiModelSelectRow">
                 <select id="aiModel"><option value="">— enter key and click Load —</option></select>
                 <button class="toggle-key" id="loadModelsBtn" type="button">Load</button>
             </div>
@@ -695,14 +703,33 @@
 
     const aiConfigBtn     = document.getElementById('aiConfigBtn');
     const aiModalBackdrop = document.getElementById('aiModalBackdrop');
-    const aiApiKeyInput   = document.getElementById('aiApiKey');
-    const aiModelSelect   = document.getElementById('aiModel');
-    const aiModalCancel   = document.getElementById('aiModalCancel');
-    const aiModalSave     = document.getElementById('aiModalSave');
-    const aiSavedNote     = document.getElementById('aiSavedNote');
-    const toggleKeyBtn    = document.getElementById('toggleKeyBtn');
-    const loadModelsBtn   = document.getElementById('loadModelsBtn');
-    const aiModelStatus   = document.getElementById('aiModelStatus');
+    const aiProviderSelect  = document.getElementById('aiProvider');
+    const aiApiKeyInput      = document.getElementById('aiApiKey');
+    const aiApiKeyLabel      = document.getElementById('aiApiKeyLabel');
+    const aiModelSelect      = document.getElementById('aiModel');
+    const aiModelSelectRow   = document.getElementById('aiModelSelectRow');
+    const aiModalCancel      = document.getElementById('aiModalCancel');
+    const aiModalSave        = document.getElementById('aiModalSave');
+    const aiSavedNote        = document.getElementById('aiSavedNote');
+    const toggleKeyBtn       = document.getElementById('toggleKeyBtn');
+    const loadModelsBtn      = document.getElementById('loadModelsBtn');
+    const aiModelStatus      = document.getElementById('aiModelStatus');
+
+    const PROVIDER_META = {
+        gemini: { label: 'Gemini API Key', placeholder: 'AIza…' },
+        openai: { label: 'OpenAI API Key', placeholder: 'sk-…' },
+    };
+
+    function updateProviderUI() {
+        const provider = aiProviderSelect.value;
+        const meta = PROVIDER_META[provider] || PROVIDER_META.gemini;
+        aiApiKeyLabel.textContent = meta.label;
+        aiApiKeyInput.placeholder = meta.placeholder;
+        aiModelSelect.innerHTML = '<option value="">— enter key and click Load —</option>';
+        aiModelStatus.textContent = '';
+    }
+
+    aiProviderSelect.addEventListener('change', updateProviderUI);
 
     function loadAiConfig() {
         try {
@@ -710,31 +737,49 @@
         } catch { return {}; }
     }
 
-    async function fetchGeminiModels(apiKey) {
+    // Grok uses a free-text model input (api.x.ai blocks browser CORS preflight).
+    // Gemini and OpenAI support CORS and fetch their lists live.
+    async function fetchModels(provider, apiKey) {
         aiModelStatus.textContent = 'Loading models…';
         loadModelsBtn.disabled = true;
         try {
-            const res = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`
-            );
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                aiModelStatus.textContent = `Error: ${err?.error?.message || res.statusText}`;
-                return;
+            let models = [];
+            if (provider === 'gemini') {
+                const res = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`
+                );
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    aiModelStatus.textContent = `Error: ${err?.error?.message || res.statusText}`;
+                    return;
+                }
+                const data = await res.json();
+                models = (data.models || [])
+                    .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+                    .map(m => m.name.replace(/^models\//, ''))
+                    .filter(n => /^gemini-/i.test(n) && !/embed|imagen|tts|vision-only/i.test(n))
+                    .sort();
+            } else {
+                // OpenAI — supports browser CORS
+                const res = await fetch('https://api.openai.com/v1/models', {
+                    headers: { 'Authorization': `Bearer ${apiKey}` }
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    aiModelStatus.textContent = `Error: ${err?.error?.message || res.statusText}`;
+                    return;
+                }
+                const data = await res.json();
+                models = (data.data || [])
+                    .map(m => m.id)
+                    .filter(id => /^gpt-/i.test(id))
+                    .sort();
             }
-            const data = await res.json();
-            const currentVal = aiModelSelect.value;
-            // Keep only text-generative Gemini models (exclude embeddings, imagen, tts, etc.)
-            const models = (data.models || [])
-                .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
-                .map(m => m.name.replace(/^models\//, ''))  // strip "models/" prefix
-                .filter(n => /^gemini-/i.test(n) && !/embed|imagen|tts|vision-only/i.test(n))
-                .sort();
             if (!models.length) { aiModelStatus.textContent = 'No compatible models found.'; return; }
+            const currentVal = aiModelSelect.value;
             aiModelSelect.innerHTML = models
                 .map(m => `<option value="${m}">${m}</option>`)
                 .join('');
-            // Restore previously saved model if present
             if (models.includes(currentVal)) aiModelSelect.value = currentVal;
             aiModelStatus.textContent = `${models.length} model(s) loaded.`;
         } catch (e) {
@@ -746,15 +791,16 @@
 
     async function openAiModal() {
         const cfg = loadAiConfig();
+        if (cfg.provider) aiProviderSelect.value = cfg.provider;
+        updateProviderUI();
         aiApiKeyInput.value = cfg.apiKey || '';
         aiApiKeyInput.type  = 'password';
         toggleKeyBtn.textContent = 'Show';
         aiSavedNote.textContent  = '';
         aiModelStatus.textContent = '';
         aiModalBackdrop.classList.add('open');
-        // Auto-load models if we already have a saved key
         if (cfg.apiKey) {
-            await fetchGeminiModels(cfg.apiKey);
+            await fetchModels(aiProviderSelect.value, cfg.apiKey);
             if (cfg.model) aiModelSelect.value = cfg.model;
         }
         aiApiKeyInput.focus();
@@ -784,15 +830,16 @@
     loadModelsBtn.addEventListener('click', () => {
         const key = aiApiKeyInput.value.trim();
         if (!key) { aiModelStatus.textContent = 'Enter an API key first.'; return; }
-        fetchGeminiModels(key);
+        fetchModels(aiProviderSelect.value, key);
     });
 
     aiModalSave.addEventListener('click', () => {
+        const provider = aiProviderSelect.value;
         const key = aiApiKeyInput.value.trim();
         const model = aiModelSelect.value;
         if (!key)   { aiSavedNote.style.color = '#c62828'; aiSavedNote.textContent = 'API key is required.'; return; }
         if (!model) { aiSavedNote.style.color = '#c62828'; aiSavedNote.textContent = 'Select a model first.'; return; }
-        const cfg = { apiKey: key, model };
+        const cfg = { provider, apiKey: key, model };
         localStorage.setItem(AI_STORAGE_KEY, JSON.stringify(cfg));
         aiSavedNote.style.color = '#2e7d32';
         aiSavedNote.textContent = 'Configuration saved.';
@@ -898,7 +945,7 @@
         abortConfirm.classList.remove('visible');
         translationOverlay.classList.add('active');
 
-        const BATCH_SIZE = 50;
+        const BATCH_SIZE = 20;
         const batches = [];
         for (let i = 0; i < blocks.length; i += BATCH_SIZE) {
             batches.push(blocks.slice(i, i + BATCH_SIZE));
@@ -929,26 +976,47 @@
                     `Do not add any commentary, code fences, or extra text.\n\n` +
                     stripped;
 
-                const res = await fetch(
-                    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent?key=${encodeURIComponent(cfg.apiKey)}`,
-                    {
+                let translatedText, batchTokens;
+                const { provider, apiKey, model } = cfg;
+
+                if (provider === 'openai') {
+                    const res = await fetch('https://api.openai.com/v1/chat/completions', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${apiKey}`
+                        },
+                        body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] })
+                    });
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err?.error?.message || res.statusText);
                     }
-                );
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err?.error?.message || res.statusText);
+                    const data = await res.json();
+                    translatedText = data?.choices?.[0]?.message?.content;
+                    if (!translatedText) throw new Error('Empty response from API.');
+                    batchTokens = data.usage?.total_tokens || 0;
+                } else {
+                    // Gemini (default)
+                    const res = await fetch(
+                        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+                        {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                        }
+                    );
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err?.error?.message || res.statusText);
+                    }
+                    const data = await res.json();
+                    translatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (!translatedText) throw new Error('Empty response from API.');
+                    batchTokens = data.usageMetadata?.totalTokenCount || 0;
                 }
-                const data = await res.json();
-                const translatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (!translatedText) throw new Error('Empty response from API.');
 
-                if (data.usageMetadata) {
-                    totalTokens += data.usageMetadata.totalTokenCount || 0;
-                }
-
+                totalTokens += batchTokens;
                 assembledParts.push(reassembleSRT(batch, translatedText));
                 updateOverlay(i + 1, batches.length, totalTokens);
 
