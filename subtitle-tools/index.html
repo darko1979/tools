@@ -132,11 +132,38 @@
             font-size: 12px;
             color: #888;
         }
+
+        .app-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            max-width: 1000px;
+            margin-bottom: 16px;
+        }
+        .app-header h1 { margin-bottom: 0; }
+
+        #installBtn {
+            display: none;
+            padding: 7px 16px;
+            background: #1a237e;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            letter-spacing: 0.3px;
+            transition: background 0.18s;
+        }
+        #installBtn:hover { background: #283593; }
     </style>
 </head>
 <body>
 
-<h1>Subtitle Tools</h1>
+<div class="app-header">
+    <h1>Subtitle Tools</h1>
+    <button id="installBtn">&#8595; Install App</button>
+</div>
 
 <div class="panel">
     <div class="controls">
@@ -346,6 +373,29 @@
 </script>
 
 <script>
+    // ── PWA install prompt ────────────────────────────────────────────────────
+    let _deferredInstallPrompt = null;
+    const installBtn = document.getElementById('installBtn');
+
+    window.addEventListener('beforeinstallprompt', e => {
+        e.preventDefault();
+        _deferredInstallPrompt = e;
+        installBtn.style.display = 'inline-block';
+    });
+
+    installBtn.addEventListener('click', async () => {
+        if (!_deferredInstallPrompt) return;
+        _deferredInstallPrompt.prompt();
+        const { outcome } = await _deferredInstallPrompt.userChoice;
+        if (outcome === 'accepted') installBtn.style.display = 'none';
+        _deferredInstallPrompt = null;
+    });
+
+    window.addEventListener('appinstalled', () => {
+        installBtn.style.display = 'none';
+        _deferredInstallPrompt = null;
+    });
+
     // ── Service Worker registration ────────────────────────────────────────────
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
