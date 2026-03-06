@@ -1063,22 +1063,17 @@
         _deferredInstallPrompt = null;
     });
 
-    // ── Display version from manifest ─────────────────────────────────────────
-    fetch('./manifest.json')
-        .then(r => r.json())
-        .then(m => {
-            if (m.version) {
-                document.getElementById('appVersion').textContent = 'v' + m.version;
-            }
-        })
-        .catch(() => {});
-
     // ── Service Worker registration & update detection ────────────────────────
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('./sw.js')
                 .then(reg => {
                     console.log('[SW] Registered, scope:', reg.scope);
+
+                    // If a SW is already controlling the page, ask it for the version
+                    if (navigator.serviceWorker.controller) {
+                        navigator.serviceWorker.controller.postMessage({ type: 'GET_VERSION' });
+                    }
 
                     // When a new SW installs while this page is open
                     reg.addEventListener('updatefound', () => {
@@ -1102,8 +1097,11 @@
                 }
             });
 
-            // Also handle the NEW_VERSION broadcast from the SW activate handler
+            // Handle messages from the SW
             navigator.serviceWorker.addEventListener('message', event => {
+                if (event.data?.type === 'VERSION') {
+                    document.getElementById('appVersion').textContent = 'v' + event.data.version;
+                }
                 if (event.data && event.data.type === 'NEW_VERSION' && !refreshing) {
                     refreshing = true;
                     window.location.reload();

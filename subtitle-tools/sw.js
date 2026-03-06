@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'subtitle-tools-v1.0.4';
+const CACHE_NAME = '1.0.5';
 const CORE_ASSETS = [
     './index.html',
     './manifest.json',
@@ -31,7 +31,10 @@ self.addEventListener('activate', event => {
             .then(() =>
                 // Tell every open tab that a new version has taken over
                 self.clients.matchAll({ type: 'window' }).then(clients =>
-                    clients.forEach(client => client.postMessage({ type: 'NEW_VERSION' }))
+                    clients.forEach(client => {
+                        client.postMessage({ type: 'NEW_VERSION' });
+                        client.postMessage({ type: 'VERSION', version: CACHE_NAME });
+                    })
                 )
             )
     );
@@ -41,6 +44,9 @@ self.addEventListener('activate', event => {
 self.addEventListener('message', event => {
     if (event.data && event.data.type === 'SKIP_WAITING') {
         self.skipWaiting();
+    }
+    if (event.data && event.data.type === 'GET_VERSION') {
+        event.source.postMessage({ type: 'VERSION', version: CACHE_NAME });
     }
 });
 
