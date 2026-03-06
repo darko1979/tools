@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'subtitle-tools-v1';
+const CACHE_NAME = 'subtitle-tools-v1.0.4';
 const CORE_ASSETS = [
     './index.html',
     './manifest.json',
