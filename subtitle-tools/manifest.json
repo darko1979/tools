@@ -1,7 +1,8 @@
 {
   "name": "Subtitle Tools",
   "short_name": "SubTools",
-  "description": "Load, convert charset and download .srt subtitle files as UTF-8 with BOM",
+  "version": "1.0.0",
+  "description": "Subtitle tools: character encoding conversion, AI translation",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

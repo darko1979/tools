@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Subtitle Tools</title>
 
     <!-- PWA -->
@@ -141,6 +144,14 @@
             margin-bottom: 16px;
         }
         .app-header h1 { margin-bottom: 0; }
+        .app-version {
+            font-size: 14px;
+            color: #888;
+            margin-left: 8px;
+            font-weight: 400;
+            align-self: flex-end;
+            margin-bottom: 3px;
+        }
 
         #installBtn {
             display: none;
@@ -331,7 +342,7 @@
 <body>
 
 <div class="app-header">
-    <h1>Subtitle Tools</h1>
+    <h1>Subtitle Tools <span class="app-version" id="appVersion"></span></h1>
     <div class="header-actions">
         <button id="aiConfigBtn">&#9881; AI Configuration</button>
         <button id="installBtn">&#8595; Install App</button>
@@ -882,12 +893,52 @@
         _deferredInstallPrompt = null;
     });
 
-    // ── Service Worker registration ────────────────────────────────────────────
+    // ── Display version from manifest ─────────────────────────────────────────
+    fetch('./manifest.json')
+        .then(r => r.json())
+        .then(m => {
+            if (m.version) {
+                document.getElementById('appVersion').textContent = 'v' + m.version;
+            }
+        })
+        .catch(() => {});
+
+    // ── Service Worker registration & update detection ────────────────────────
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('./sw.js')
-                .then(reg => console.log('[SW] Registered, scope:', reg.scope))
+                .then(reg => {
+                    console.log('[SW] Registered, scope:', reg.scope);
+
+                    // When a new SW installs while this page is open
+                    reg.addEventListener('updatefound', () => {
+                        const newWorker = reg.installing;
+                        newWorker.addEventListener('statechange', () => {
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                // A new SW is waiting — tell it to activate immediately
+                                newWorker.postMessage({ type: 'SKIP_WAITING' });
+                            }
+                        });
+                    });
+                })
                 .catch(err => console.warn('[SW] Registration failed:', err));
+
+            // When a new SW takes control, reload to load the latest version
+            let refreshing = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (!refreshing) {
+                    refreshing = true;
+                    window.location.reload();
+                }
+            });
+
+            // Also handle the NEW_VERSION broadcast from the SW activate handler
+            navigator.serviceWorker.addEventListener('message', event => {
+                if (event.data && event.data.type === 'NEW_VERSION' && !refreshing) {
+                    refreshing = true;
+                    window.location.reload();
+                }
+            });
         });
     }
 </script>
