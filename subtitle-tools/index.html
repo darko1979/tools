@@ -429,6 +429,7 @@
             <button class="btn-cancel" id="translateCancel">Cancel</button>
             <button class="btn-save" id="translateStart">&#9654; Start</button>
         </div>
+        <div style="font-size:11px;color:#888;margin-top:10px;text-align:right" id="translateAiInfo"></div>
     </div>
 </div>
 
@@ -882,6 +883,10 @@
             alert('⚠️ Please configure AI first using the ⚙ AI Configuration button.');
             return;
         }
+        const providerLabels = { gemini: 'Google Gemini', openai: 'OpenAI' };
+        const providerLabel = providerLabels[cfg.provider] || cfg.provider || 'Gemini';
+        document.getElementById('translateAiInfo').textContent =
+            `Using ${providerLabel} · ${cfg.model}`;
         translateBackdrop.classList.add('open');
     });
 

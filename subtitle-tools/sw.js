@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = '1.0.5';
+const CACHE_NAME = '1.0.6';
 const CORE_ASSETS = [
     './index.html',
     './manifest.json',
