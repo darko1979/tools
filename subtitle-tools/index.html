@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subtitle Tools</title>
+
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#1a237e">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SubTools">
+    <link rel="apple-touch-icon" href="icons/icon.svg">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #f0f2f5;
+            color: #333;
+            padding: 24px 20px;
+        }
+
+        h1 {
+            color: #1a237e;
+            font-size: 22px;
+            margin-bottom: 16px;
+        }
+
+        .panel {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+            padding: 16px 20px;
+            margin-bottom: 14px;
+            max-width: 1000px;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: flex-end;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .control-label {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: #888;
+        }
+
+        input[type="file"] {
+            font-size: 14px;
+            color: #333;
+        }
+
+        .encoding-badge {
+            display: inline-block;
+            padding: 6px 14px;
+            background: #e3f2fd;
+            color: #1565c0;
+            border: 1px solid #90caf9;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            min-width: 160px;
+            text-align: center;
+        }
+
+        .encoding-badge.detected-ascii   { background: #f3e5f5; color: #6a1b9a; border-color: #ce93d8; }
+        .encoding-badge.detected-utf8    { background: #e8f5e9; color: #2e7d32; border-color: #a5d6a7; }
+        .encoding-badge.detected-utf8bom { background: #e0f4e8; color: #1b5e20; border-color: #81c784; }
+        .encoding-badge.detected-unknown { background: #fff3e0; color: #e65100; border-color: #ffb74d; }
+
+        select {
+            padding: 7px 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            background: #fff;
+            min-width: 230px;
+            cursor: pointer;
+        }
+        select:focus { outline: none; border-color: #1976d2; box-shadow: 0 0 0 2px rgba(25,118,210,0.15); }
+
+        .btn-download {
+            padding: 8px 18px;
+            background: #1976d2;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.18s;
+            white-space: nowrap;
+        }
+        .btn-download:hover:not(:disabled) { background: #1565c0; }
+        .btn-download:disabled { background: #b0bec5; cursor: not-allowed; }
+
+        .memo-panel {
+            max-width: 1000px;
+        }
+
+        textarea {
+            width: 100%;
+            height: 540px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.55;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            resize: vertical;
+            color: #222;
+            background: #fafafa;
+        }
+        textarea:focus { outline: none; border-color: #1976d2; background: #fff; }
+
+        .status-bar {
+            margin-top: 6px;
+            font-size: 12px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Subtitle Tools</h1>
+
+<div class="panel">
+    <div class="controls">
+
+        <div class="control-group">
+            <span class="control-label">Load Subtitle File (.srt)</span>
+            <input type="file" id="fileInput" accept=".srt,.txt">
+        </div>
+
+        <div class="control-group">
+            <span class="control-label">Detected Encoding</span>
+            <span class="encoding-badge" id="detectedEncoding">—</span>
+        </div>
+
+        <div class="control-group">
+            <span class="control-label">Source Charset (re-decode as)</span>
+            <select id="charsetSelect">
+                <option value="windows-1250">Windows-1250 — Central European</option>
+                <option value="windows-1251">Windows-1251 — Cyrillic</option>
+                <option value="windows-1252">Windows-1252 — Western European</option>
+                <option value="windows-1253">Windows-1253 — Greek</option>
+                <option value="windows-1254">Windows-1254 — Turkish</option>
+                <option value="windows-1255">Windows-1255 — Hebrew</option>
+                <option value="windows-1256">Windows-1256 — Arabic</option>
+                <option value="windows-1257">Windows-1257 — Baltic</option>
+                <option value="windows-1258">Windows-1258 — Vietnamese</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <span class="control-label">&nbsp;</span>
+            <button class="btn-download" id="downloadBtn" disabled>&#8595; Download as UTF-8 with BOM</button>
+        </div>
+
+    </div>
+</div>
+
+<div class="panel memo-panel">
+    <textarea id="memoBox" readonly spellcheck="false"
+        placeholder="Load an .srt file above to view its contents here..."></textarea>
+    <div class="status-bar" id="statusBar"></div>
+</div>
+
+<script>
+    'use strict';
+
+    let rawBytes       = null;   // Uint8Array of original file bytes
+    let hasBOM         = false;  // whether original file had UTF-8 BOM
+    let originalName   = 'subtitle.srt';
+
+    const fileInput        = document.getElementById('fileInput');
+    const memoBox          = document.getElementById('memoBox');
+    const detectedEncEl    = document.getElementById('detectedEncoding');
+    const charsetSelect    = document.getElementById('charsetSelect');
+    const downloadBtn      = document.getElementById('downloadBtn');
+    const statusBar        = document.getElementById('statusBar');
+
+    // ── Encoding detection ────────────────────────────────────────────────────
+
+    function isValidUTF8(bytes) {
+        let i = 0;
+        while (i < bytes.length) {
+            const b = bytes[i];
+            if (b <= 0x7F) {
+                i += 1;
+            } else if ((b & 0xE0) === 0xC0) {
+                if (i + 1 >= bytes.length || (bytes[i + 1] & 0xC0) !== 0x80) return false;
+                i += 2;
+            } else if ((b & 0xF0) === 0xE0) {
+                if (i + 2 >= bytes.length ||
+                    (bytes[i + 1] & 0xC0) !== 0x80 ||
+                    (bytes[i + 2] & 0xC0) !== 0x80) return false;
+                i += 3;
+            } else if ((b & 0xF8) === 0xF0) {
+                if (i + 3 >= bytes.length ||
+                    (bytes[i + 1] & 0xC0) !== 0x80 ||
+                    (bytes[i + 2] & 0xC0) !== 0x80 ||
+                    (bytes[i + 3] & 0xC0) !== 0x80) return false;
+                i += 4;
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    function detectEncoding(bytes) {
+        // UTF-8 BOM: EF BB BF
+        if (bytes.length >= 3 &&
+            bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+            return { label: 'UTF-8 with BOM', cssClass: 'detected-utf8bom', hasBOM: true };
+        }
+        // Pure ASCII (all bytes ≤ 127)
+        let ascii = true;
+        for (let i = 0; i < bytes.length; i++) {
+            if (bytes[i] > 127) { ascii = false; break; }
+        }
+        if (ascii) {
+            return { label: 'ASCII', cssClass: 'detected-ascii', hasBOM: false };
+        }
+        // Valid UTF-8 multi-byte sequences
+        if (isValidUTF8(bytes)) {
+            return { label: 'UTF-8', cssClass: 'detected-utf8', hasBOM: false };
+        }
+        // Likely a single-byte Windows codepage
+        return { label: 'Unknown (select charset)', cssClass: 'detected-unknown', hasBOM: false };
+    }
+
+    // ── Decoding ──────────────────────────────────────────────────────────────
+
+    /**
+     * Decode bytes with the given WHATWG charset label.
+     * If skipBOM is true, the first 3 bytes (UTF-8 BOM) are omitted before decoding.
+     */
+    function decodeBytes(bytes, charset, skipBOM) {
+        const slice = (skipBOM && bytes.length >= 3) ? bytes.slice(3) : bytes;
+        return new TextDecoder(charset, { fatal: false }).decode(slice);
+    }
+
+    // ── UI update ─────────────────────────────────────────────────────────────
+
+    function setStatus(msg) {
+        statusBar.textContent = msg;
+    }
+
+    function displayWithCharset(charset) {
+        if (!rawBytes) return;
+        const text = decodeBytes(rawBytes, charset, hasBOM);
+        memoBox.value = text;
+        const lines = text.split('\n').length;
+        const chars = text.length;
+        setStatus(`${lines.toLocaleString()} lines · ${chars.toLocaleString()} characters · decoded as ${charset}`);
+    }
+
+    // ── File loading ──────────────────────────────────────────────────────────
+
+    fileInput.addEventListener('change', function (e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        originalName = file.name;
+
+        const reader = new FileReader();
+        reader.onload = function (ev) {
+            rawBytes = new Uint8Array(ev.target.result);
+
+            const enc = detectEncoding(rawBytes);
+            hasBOM = enc.hasBOM;
+
+            // Update encoding badge
+            detectedEncEl.textContent = enc.label;
+            detectedEncEl.className   = 'encoding-badge ' + enc.cssClass;
+
+            // Initial display:
+            // - Unicode files → decode as UTF-8 (shows correct text immediately)
+            // - Unknown        → decode as selected Windows charset
+            if (enc.cssClass === 'detected-utf8bom' ||
+                enc.cssClass === 'detected-utf8'    ||
+                enc.cssClass === 'detected-ascii') {
+                memoBox.value = decodeBytes(rawBytes, 'utf-8', hasBOM);
+                const lines = memoBox.value.split('\n').length;
+                setStatus(`${lines.toLocaleString()} lines · ${memoBox.value.length.toLocaleString()} characters · ${enc.label}`);
+            } else {
+                displayWithCharset(charsetSelect.value);
+            }
+
+            downloadBtn.disabled = false;
+        };
+        reader.readAsArrayBuffer(file);
+    });
+
+    // ── Charset change ────────────────────────────────────────────────────────
+
+    charsetSelect.addEventListener('change', function () {
+        if (!rawBytes) return;
+        displayWithCharset(charsetSelect.value);
+    });
+
+    // ── Download ──────────────────────────────────────────────────────────────
+
+    downloadBtn.addEventListener('click', function () {
+        if (!rawBytes) return;
+
+        const text = memoBox.value;
+
+        // Encode to UTF-8 bytes, then prepend BOM manually
+        const textBytes = new TextEncoder().encode(text);
+        const bomBytes  = new Uint8Array([0xEF, 0xBB, 0xBF]);
+        const output    = new Uint8Array(bomBytes.length + textBytes.length);
+        output.set(bomBytes,  0);
+        output.set(textBytes, 3);
+
+        const blob = new Blob([output], { type: 'text/plain' });
+        const url  = URL.createObjectURL(blob);
+
+        const baseName  = originalName.replace(/\.srt$/i, '');
+        const outName   = baseName + '_utf8bom.srt';
+
+        const anchor    = document.createElement('a');
+        anchor.href     = url;
+        anchor.download = outName;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+    });
+</script>
+
+<script>
+    // ── Service Worker registration ────────────────────────────────────────────
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./sw.js')
+                .then(reg => console.log('[SW] Registered, scope:', reg.scope))
+                .catch(err => console.warn('[SW] Registration failed:', err));
+        });
+    }
+</script>
+
+</body>
+</html>

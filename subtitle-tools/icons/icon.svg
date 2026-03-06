@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="88" fill="#1a237e"/>
+  <!-- Text: srt -->
+  <text x="256" y="260" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="200" text-anchor="middle" fill="#ffffff" letter-spacing="-4">srt</text>
+  <!-- Text: tools -->
+  <text x="256" y="410" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="130" text-anchor="middle" fill="#42a5f5" letter-spacing="2">tools</text>
+</svg>
