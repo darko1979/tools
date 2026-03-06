@@ -336,7 +336,43 @@
             font-size: 15px;
             font-weight: 600;
             letter-spacing: 0.2px;
+            text-align: center;
         }
+        .btn-abort-translation {
+            padding: 7px 22px;
+            background: transparent;
+            color: rgba(255,255,255,0.85);
+            border: 1.5px solid rgba(255,255,255,0.5);
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            letter-spacing: 0.2px;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .btn-abort-translation:hover { background: rgba(255,255,255,0.12); border-color: #fff; }
+        .abort-confirm {
+            display: none;
+            align-items: center;
+            gap: 10px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .abort-confirm.visible { display: flex; }
+        .abort-confirm-btns { display: flex; gap: 8px; }
+        .abort-confirm-btns button {
+            padding: 6px 18px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+        }
+        #abortConfirmYes { background: #c62828; color: #fff; }
+        #abortConfirmYes:hover { background: #b71c1c; }
+        #abortConfirmNo { background: rgba(255,255,255,0.15); color: #fff; border: 1.5px solid rgba(255,255,255,0.5); }
+        #abortConfirmNo:hover { background: rgba(255,255,255,0.28); }
     </style>
 </head>
 <body>
@@ -400,6 +436,14 @@
 <div id="translationOverlay">
     <div class="spinner"></div>
     <div class="translation-msg"></div>
+    <button class="btn-abort-translation" id="abortTranslationBtn">&#9632; Abort</button>
+    <div class="abort-confirm" id="abortConfirm">
+        <span>Abort translation?</span>
+        <div class="abort-confirm-btns">
+            <button id="abortConfirmYes">Abort</button>
+            <button id="abortConfirmNo">Continue</button>
+        </div>
+    </div>
 </div>
 
 <!-- AI Configuration Modal -->
@@ -763,8 +807,27 @@
     const langSelect         = document.getElementById('langSelect');
     const translateCancel    = document.getElementById('translateCancel');
     const translateStart     = document.getElementById('translateStart');
-    const translationOverlay = document.getElementById('translationOverlay');
-    const translationMsg     = translationOverlay.querySelector('.translation-msg');
+    const translationOverlay  = document.getElementById('translationOverlay');
+    const translationMsg      = translationOverlay.querySelector('.translation-msg');
+    const abortTranslationBtn = document.getElementById('abortTranslationBtn');
+    const abortConfirm        = document.getElementById('abortConfirm');
+    const abortConfirmYes     = document.getElementById('abortConfirmYes');
+    const abortConfirmNo      = document.getElementById('abortConfirmNo');
+
+    let abortRequested = false;
+
+    abortTranslationBtn.addEventListener('click', () => {
+        abortTranslationBtn.style.display = 'none';
+        abortConfirm.classList.add('visible');
+    });
+    abortConfirmNo.addEventListener('click', () => {
+        abortConfirm.classList.remove('visible');
+        abortTranslationBtn.style.display = '';
+    });
+    abortConfirmYes.addEventListener('click', () => {
+        abortRequested = true;
+        abortConfirm.classList.remove('visible');
+    });
 
     translateBtn.addEventListener('click', () => {
         const cfg = loadAiConfig();
@@ -826,43 +889,82 @@
         const blocks  = parseSRT(srtText);
         if (!blocks.length) { alert('No subtitle blocks found.'); return; }
 
-        const targetLang = langSelect.value;
-        const stripped   = buildStripped(blocks);
+        const targetLang      = langSelect.value;
+        const targetLangLabel = langSelect.options[langSelect.selectedIndex].text;
 
         translateBackdrop.classList.remove('open');
-        translationMsg.textContent = `Translating to ${langSelect.options[langSelect.selectedIndex].text}…`;
+        abortRequested = false;
+        abortTranslationBtn.style.display = '';
+        abortConfirm.classList.remove('visible');
         translationOverlay.classList.add('active');
 
-        const prompt =
-            `Translate the following subtitle text to ${targetLang}.\n` +
-            `Return ONLY the translated subtitles in the exact same format: ` +
-            `block number on its own line, then the translated text lines. ` +
-            `Do not add any commentary, code fences, or extra text.\n\n` +
-            stripped;
+        const BATCH_SIZE = 50;
+        const batches = [];
+        for (let i = 0; i < blocks.length; i += BATCH_SIZE) {
+            batches.push(blocks.slice(i, i + BATCH_SIZE));
+        }
+
+        let totalTokens = 0;
+
+        function updateOverlay(batchDone, totalBatches, tokens) {
+            const pct = totalBatches === 0 ? 0 : Math.round((batchDone / totalBatches) * 100);
+            translationMsg.innerHTML =
+                `Translating to ${targetLangLabel}&hellip; ${pct}%` +
+                `<br><small style="font-weight:400;opacity:0.82;font-size:13px">${tokens.toLocaleString()} tokens used</small>`;
+        }
+
+        updateOverlay(0, batches.length, 0);
 
         try {
-            const res = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent?key=${encodeURIComponent(cfg.apiKey)}`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-                }
-            );
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err?.error?.message || res.statusText);
-            }
-            const data = await res.json();
-            const translatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (!translatedText) throw new Error('Empty response from API.');
+            const assembledParts = [];
 
-            const result = reassembleSRT(blocks, translatedText);
+            for (let i = 0; i < batches.length; i++) {
+                const batch   = batches[i];
+                const stripped = buildStripped(batch);
+
+                const prompt =
+                    `Translate the following subtitle text to ${targetLang}.\n` +
+                    `Return ONLY the translated subtitles in the exact same format: ` +
+                    `block number on its own line, then the translated text lines. ` +
+                    `Do not add any commentary, code fences, or extra text.\n\n` +
+                    stripped;
+
+                const res = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent?key=${encodeURIComponent(cfg.apiKey)}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    }
+                );
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err?.error?.message || res.statusText);
+                }
+                const data = await res.json();
+                const translatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!translatedText) throw new Error('Empty response from API.');
+
+                if (data.usageMetadata) {
+                    totalTokens += data.usageMetadata.totalTokenCount || 0;
+                }
+
+                assembledParts.push(reassembleSRT(batch, translatedText));
+                updateOverlay(i + 1, batches.length, totalTokens);
+
+                if (abortRequested) break;
+            }
+
+            const result = assembledParts.join('\n\n');
             memoBox.value = result;
             const lines = result.split('\n').length;
-            setStatus(`Translation complete · ${lines.toLocaleString()} lines · ${result.length.toLocaleString()} characters`);
+            if (abortRequested) {
+                setStatus(`Translation aborted · ${assembledParts.length} of ${batches.length} batch(es) done · ${lines.toLocaleString()} lines · ${totalTokens.toLocaleString()} tokens used`);
+            } else {
+                setStatus(`Translation complete · ${lines.toLocaleString()} lines · ${result.length.toLocaleString()} characters · ${totalTokens.toLocaleString()} tokens used`);
+            }
         } catch (e) {
-            alert(`Translation failed: ${e.message}`);
+            if (!abortRequested) alert(`Translation failed: ${e.message}`);
         } finally {
             translationOverlay.classList.remove('active');
         }
