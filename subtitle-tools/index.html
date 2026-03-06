@@ -156,13 +156,269 @@
             transition: background 0.18s;
         }
         #installBtn:hover { background: #283593; }
+
+        .header-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        #aiConfigBtn {
+            padding: 7px 16px;
+            background: #fff;
+            color: #1a237e;
+            border: 1.5px solid #1a237e;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            letter-spacing: 0.3px;
+            transition: background 0.18s, color 0.18s;
+        }
+        #aiConfigBtn:hover { background: #e8eaf6; }
+
+        /* ── Modal ── */
+        .modal-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-backdrop.open { display: flex; }
+
+        .modal {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.22);
+            padding: 28px 28px 22px;
+            width: 420px;
+            max-width: calc(100vw - 32px);
+        }
+        .modal h2 {
+            font-size: 17px;
+            color: #1a237e;
+            margin-bottom: 20px;
+        }
+        .modal-field {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            margin-bottom: 16px;
+        }
+        .modal-field label {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: #888;
+        }
+        .modal-field input[type="password"],
+        .modal-field input[type="text"],
+        .modal-field select {
+            padding: 8px 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            min-width: unset;
+            width: 100%;
+        }
+        .modal-field input:focus,
+        .modal-field select:focus {
+            outline: none;
+            border-color: #1976d2;
+            box-shadow: 0 0 0 2px rgba(25,118,210,0.15);
+        }
+        .modal-field .key-row {
+            display: flex;
+            gap: 6px;
+        }
+        .modal-field .key-row input { flex: 1; }
+        .modal-field .toggle-key {
+            padding: 8px 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: #f5f5f5;
+            cursor: pointer;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 20px;
+        }
+        .btn-cancel {
+            padding: 8px 18px;
+            background: #f5f5f5;
+            color: #333;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-cancel:hover { background: #ebebeb; }
+        .btn-save {
+            padding: 8px 18px;
+            background: #1a237e;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.18s;
+        }
+        .btn-save:hover { background: #283593; }
+        .modal-saved-note {
+            font-size: 12px;
+            color: #2e7d32;
+            margin-top: 8px;
+            min-height: 16px;
+            text-align: right;
+        }
+
+        /* ── Translate button ── */
+        .btn-translate {
+            padding: 8px 18px;
+            background: #00695c;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.18s;
+            white-space: nowrap;
+        }
+        .btn-translate:hover:not(:disabled) { background: #00574a; }
+        .btn-translate:disabled { background: #b0bec5; cursor: not-allowed; }
+
+        /* ── Translation progress overlay ── */
+        #translationOverlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.55);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 18px;
+        }
+        #translationOverlay.active { display: flex; }
+        .spinner {
+            width: 52px;
+            height: 52px;
+            border: 5px solid rgba(255,255,255,0.25);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.85s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .translation-msg {
+            color: #fff;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+        }
     </style>
 </head>
 <body>
 
 <div class="app-header">
     <h1>Subtitle Tools</h1>
-    <button id="installBtn">&#8595; Install App</button>
+    <div class="header-actions">
+        <button id="aiConfigBtn">&#9881; AI Configuration</button>
+        <button id="installBtn">&#8595; Install App</button>
+    </div>
+</div>
+
+<!-- Translation Modal -->
+<div class="modal-backdrop" id="translateBackdrop">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="translateModalTitle">
+        <h2 id="translateModalTitle">&#127760; Translate Subtitles</h2>
+
+        <div class="modal-field">
+            <label for="langSelect">Target Language</label>
+            <select id="langSelect">
+                <optgroup label="Serbian">
+                    <option value="Serbian Latin">Serbian (Latin)</option>
+                    <option value="Serbian Cyrillic">Serbian (Cyrillic)</option>
+                </optgroup>
+                <optgroup label="Other Languages">
+                    <option value="English">English</option>
+                    <option value="Spanish">Spanish</option>
+                    <option value="French">French</option>
+                    <option value="German">German</option>
+                    <option value="Italian">Italian</option>
+                    <option value="Portuguese">Portuguese</option>
+                    <option value="Croatian">Croatian</option>
+                    <option value="Bosnian">Bosnian</option>
+                    <option value="Slovenian">Slovenian</option>
+                    <option value="Russian">Russian</option>
+                    <option value="Ukrainian">Ukrainian</option>
+                    <option value="Polish">Polish</option>
+                    <option value="Czech">Czech</option>
+                    <option value="Slovak">Slovak</option>
+                    <option value="Romanian">Romanian</option>
+                    <option value="Hungarian">Hungarian</option>
+                    <option value="Greek">Greek</option>
+                    <option value="Turkish">Turkish</option>
+                    <option value="Arabic">Arabic</option>
+                    <option value="Japanese">Japanese</option>
+                    <option value="Chinese Simplified">Chinese (Simplified)</option>
+                    <option value="Chinese Traditional">Chinese (Traditional)</option>
+                    <option value="Korean">Korean</option>
+                </optgroup>
+            </select>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn-cancel" id="translateCancel">Cancel</button>
+            <button class="btn-save" id="translateStart">&#9654; Start</button>
+        </div>
+    </div>
+</div>
+
+<!-- Translation progress overlay -->
+<div id="translationOverlay">
+    <div class="spinner"></div>
+    <div class="translation-msg"></div>
+</div>
+
+<!-- AI Configuration Modal -->
+<div class="modal-backdrop" id="aiModalBackdrop">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="aiModalTitle">
+        <h2 id="aiModalTitle">&#9881; AI Configuration</h2>
+
+        <div class="modal-field">
+            <label for="aiApiKey">Gemini API Key</label>
+            <div class="key-row">
+                <input type="password" id="aiApiKey" placeholder="AIza..." autocomplete="off">
+                <button class="toggle-key" id="toggleKeyBtn" type="button">Show</button>
+            </div>
+        </div>
+
+        <div class="modal-field">
+            <label for="aiModel">Model</label>
+            <div class="key-row">
+                <select id="aiModel"><option value="">— enter key and click Load —</option></select>
+                <button class="toggle-key" id="loadModelsBtn" type="button">Load</button>
+            </div>
+            <span id="aiModelStatus" style="font-size:11px;color:#888;min-height:14px;"></span>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn-cancel" id="aiModalCancel">Cancel</button>
+            <button class="btn-save" id="aiModalSave">Save</button>
+        </div>
+        <div class="modal-saved-note" id="aiSavedNote"></div>
+    </div>
 </div>
 
 <div class="panel">
@@ -191,6 +447,11 @@
                 <option value="windows-1257">Windows-1257 — Baltic</option>
                 <option value="windows-1258">Windows-1258 — Vietnamese</option>
             </select>
+        </div>
+
+        <div class="control-group">
+            <span class="control-label">&nbsp;</span>
+            <button class="btn-translate" id="translateBtn" disabled>&#127760; Translate</button>
         </div>
 
         <div class="control-group">
@@ -331,6 +592,7 @@
             }
 
             downloadBtn.disabled = false;
+            translateBtn.disabled = false;
         };
         reader.readAsArrayBuffer(file);
     });
@@ -369,6 +631,230 @@
         anchor.click();
         document.body.removeChild(anchor);
         URL.revokeObjectURL(url);
+    });
+</script>
+
+<script>
+    // ── AI Configuration ──────────────────────────────────────────────────────
+    const AI_STORAGE_KEY = 'subtitleTools_aiConfig';
+
+    const aiConfigBtn     = document.getElementById('aiConfigBtn');
+    const aiModalBackdrop = document.getElementById('aiModalBackdrop');
+    const aiApiKeyInput   = document.getElementById('aiApiKey');
+    const aiModelSelect   = document.getElementById('aiModel');
+    const aiModalCancel   = document.getElementById('aiModalCancel');
+    const aiModalSave     = document.getElementById('aiModalSave');
+    const aiSavedNote     = document.getElementById('aiSavedNote');
+    const toggleKeyBtn    = document.getElementById('toggleKeyBtn');
+    const loadModelsBtn   = document.getElementById('loadModelsBtn');
+    const aiModelStatus   = document.getElementById('aiModelStatus');
+
+    function loadAiConfig() {
+        try {
+            return JSON.parse(localStorage.getItem(AI_STORAGE_KEY)) || {};
+        } catch { return {}; }
+    }
+
+    async function fetchGeminiModels(apiKey) {
+        aiModelStatus.textContent = 'Loading models…';
+        loadModelsBtn.disabled = true;
+        try {
+            const res = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`
+            );
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                aiModelStatus.textContent = `Error: ${err?.error?.message || res.statusText}`;
+                return;
+            }
+            const data = await res.json();
+            const currentVal = aiModelSelect.value;
+            // Keep only text-generative Gemini models (exclude embeddings, imagen, tts, etc.)
+            const models = (data.models || [])
+                .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+                .map(m => m.name.replace(/^models\//, ''))  // strip "models/" prefix
+                .filter(n => /^gemini-/i.test(n) && !/embed|imagen|tts|vision-only/i.test(n))
+                .sort();
+            if (!models.length) { aiModelStatus.textContent = 'No compatible models found.'; return; }
+            aiModelSelect.innerHTML = models
+                .map(m => `<option value="${m}">${m}</option>`)
+                .join('');
+            // Restore previously saved model if present
+            if (models.includes(currentVal)) aiModelSelect.value = currentVal;
+            aiModelStatus.textContent = `${models.length} model(s) loaded.`;
+        } catch (e) {
+            aiModelStatus.textContent = `Fetch failed: ${e.message}`;
+        } finally {
+            loadModelsBtn.disabled = false;
+        }
+    }
+
+    async function openAiModal() {
+        const cfg = loadAiConfig();
+        aiApiKeyInput.value = cfg.apiKey || '';
+        aiApiKeyInput.type  = 'password';
+        toggleKeyBtn.textContent = 'Show';
+        aiSavedNote.textContent  = '';
+        aiModelStatus.textContent = '';
+        aiModalBackdrop.classList.add('open');
+        // Auto-load models if we already have a saved key
+        if (cfg.apiKey) {
+            await fetchGeminiModels(cfg.apiKey);
+            if (cfg.model) aiModelSelect.value = cfg.model;
+        }
+        aiApiKeyInput.focus();
+    }
+
+    function closeAiModal() {
+        aiModalBackdrop.classList.remove('open');
+    }
+
+    aiConfigBtn.addEventListener('click', openAiModal);
+    aiModalCancel.addEventListener('click', closeAiModal);
+
+    aiModalBackdrop.addEventListener('click', e => {
+        if (e.target === aiModalBackdrop) closeAiModal();
+    });
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeAiModal();
+    });
+
+    toggleKeyBtn.addEventListener('click', () => {
+        const isHidden = aiApiKeyInput.type === 'password';
+        aiApiKeyInput.type = isHidden ? 'text' : 'password';
+        toggleKeyBtn.textContent = isHidden ? 'Hide' : 'Show';
+    });
+
+    loadModelsBtn.addEventListener('click', () => {
+        const key = aiApiKeyInput.value.trim();
+        if (!key) { aiModelStatus.textContent = 'Enter an API key first.'; return; }
+        fetchGeminiModels(key);
+    });
+
+    aiModalSave.addEventListener('click', () => {
+        const key = aiApiKeyInput.value.trim();
+        const model = aiModelSelect.value;
+        if (!key)   { aiSavedNote.style.color = '#c62828'; aiSavedNote.textContent = 'API key is required.'; return; }
+        if (!model) { aiSavedNote.style.color = '#c62828'; aiSavedNote.textContent = 'Select a model first.'; return; }
+        const cfg = { apiKey: key, model };
+        localStorage.setItem(AI_STORAGE_KEY, JSON.stringify(cfg));
+        aiSavedNote.style.color = '#2e7d32';
+        aiSavedNote.textContent = 'Configuration saved.';
+        setTimeout(closeAiModal, 900);
+    });
+</script>
+
+<script>
+    // ── Translation ───────────────────────────────────────────────────────────
+    const translateBtn       = document.getElementById('translateBtn');
+    const translateBackdrop  = document.getElementById('translateBackdrop');
+    const langSelect         = document.getElementById('langSelect');
+    const translateCancel    = document.getElementById('translateCancel');
+    const translateStart     = document.getElementById('translateStart');
+    const translationOverlay = document.getElementById('translationOverlay');
+    const translationMsg     = translationOverlay.querySelector('.translation-msg');
+
+    translateBtn.addEventListener('click', () => {
+        const cfg = loadAiConfig();
+        if (!cfg.apiKey || !cfg.model) {
+            alert('⚠️ Please configure AI first using the ⚙ AI Configuration button.');
+            return;
+        }
+        translateBackdrop.classList.add('open');
+    });
+
+    translateCancel.addEventListener('click', () => translateBackdrop.classList.remove('open'));
+    translateBackdrop.addEventListener('click', e => {
+        if (e.target === translateBackdrop) translateBackdrop.classList.remove('open');
+    });
+
+    // Parse SRT into blocks: { num, ts, textLines }
+    function parseSRT(text) {
+        const blocks = text.trim().split(/\r?\n\s*\r?\n/);
+        return blocks.map(block => {
+            const lines = block.split(/\r?\n/).map(l => l.trimEnd());
+            const num   = lines[0].trim();
+            const hasTS = lines[1] && lines[1].includes('-->');
+            const ts    = hasTS ? lines[1].trim() : null;
+            const textLines = lines.slice(hasTS ? 2 : 1);
+            return { num, ts, textLines };
+        }).filter(b => /^\d+$/.test(b.num));
+    }
+
+    // Build stripped text (number + lines, no timestamps)
+    function buildStripped(blocks) {
+        return blocks.map(b => b.num + '\n' + b.textLines.join('\n')).join('\n\n');
+    }
+
+    // Reassemble SRT with original timestamps + translated text
+    function reassembleSRT(blocks, translatedStripped) {
+        // Parse translated text into map: blockNum -> translatedLines
+        const transMap = {};
+        const parts = translatedStripped.trim().split(/\n\s*\n/);
+        for (const part of parts) {
+            const lines = part.split('\n').map(l => l.trimEnd());
+            // strip possible markdown code fences
+            const num = lines[0].replace(/[^\d]/g, '');
+            if (num) transMap[num] = lines.slice(1);
+        }
+        return blocks.map(b => {
+            const tLines = (transMap[b.num] && transMap[b.num].length)
+                ? transMap[b.num]
+                : b.textLines;
+            const ts = b.ts ? b.ts + '\n' : '';
+            return b.num + '\n' + ts + tLines.join('\n');
+        }).join('\n\n');
+    }
+
+    translateStart.addEventListener('click', async () => {
+        const cfg = loadAiConfig();
+        if (!cfg.apiKey || !cfg.model) { alert('AI not configured.'); return; }
+
+        const srtText = memoBox.value;
+        const blocks  = parseSRT(srtText);
+        if (!blocks.length) { alert('No subtitle blocks found.'); return; }
+
+        const targetLang = langSelect.value;
+        const stripped   = buildStripped(blocks);
+
+        translateBackdrop.classList.remove('open');
+        translationMsg.textContent = `Translating to ${langSelect.options[langSelect.selectedIndex].text}…`;
+        translationOverlay.classList.add('active');
+
+        const prompt =
+            `Translate the following subtitle text to ${targetLang}.\n` +
+            `Return ONLY the translated subtitles in the exact same format: ` +
+            `block number on its own line, then the translated text lines. ` +
+            `Do not add any commentary, code fences, or extra text.\n\n` +
+            stripped;
+
+        try {
+            const res = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent?key=${encodeURIComponent(cfg.apiKey)}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                }
+            );
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err?.error?.message || res.statusText);
+            }
+            const data = await res.json();
+            const translatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!translatedText) throw new Error('Empty response from API.');
+
+            const result = reassembleSRT(blocks, translatedText);
+            memoBox.value = result;
+            const lines = result.split('\n').length;
+            setStatus(`Translation complete · ${lines.toLocaleString()} lines · ${result.length.toLocaleString()} characters`);
+        } catch (e) {
+            alert(`Translation failed: ${e.message}`);
+        } finally {
+            translationOverlay.classList.remove('active');
+        }
     });
 </script>
 
