@@ -373,6 +373,38 @@
         #abortConfirmYes:hover { background: #b71c1c; }
         #abortConfirmNo { background: rgba(255,255,255,0.15); color: #fff; border: 1.5px solid rgba(255,255,255,0.5); }
         #abortConfirmNo:hover { background: rgba(255,255,255,0.28); }
+
+        /* ── Translation error (retry / cancel) ── */
+        .translation-error {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+            max-width: 460px;
+            padding: 0 16px;
+        }
+        .translation-error.visible { display: flex; }
+        .translation-error-msg {
+            color: #fff;
+            font-size: 14px;
+            text-align: center;
+            line-height: 1.45;
+            word-break: break-word;
+        }
+        .translation-error-msg strong { color: #ffab91; }
+        .translation-error-btns { display: flex; gap: 8px; }
+        .translation-error-btns button {
+            padding: 7px 22px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+        }
+        #errorRetryBtn { background: #00695c; color: #fff; }
+        #errorRetryBtn:hover { background: #00574a; }
+        #errorCancelBtn { background: rgba(255,255,255,0.15); color: #fff; border: 1.5px solid rgba(255,255,255,0.5); }
+        #errorCancelBtn:hover { background: rgba(255,255,255,0.28); }
     </style>
 </head>
 <body>
@@ -443,6 +475,13 @@
         <div class="abort-confirm-btns">
             <button id="abortConfirmYes">Abort</button>
             <button id="abortConfirmNo">Continue</button>
+        </div>
+    </div>
+    <div class="translation-error" id="translationError">
+        <div class="translation-error-msg" id="translationErrorMsg"></div>
+        <div class="translation-error-btns">
+            <button id="errorRetryBtn">&#8635; Retry</button>
+            <button id="errorCancelBtn">Cancel</button>
         </div>
     </div>
 </div>
@@ -861,8 +900,85 @@
     const abortConfirm        = document.getElementById('abortConfirm');
     const abortConfirmYes     = document.getElementById('abortConfirmYes');
     const abortConfirmNo      = document.getElementById('abortConfirmNo');
+    const translationError    = document.getElementById('translationError');
+    const translationErrorMsg = document.getElementById('translationErrorMsg');
+    const errorRetryBtn       = document.getElementById('errorRetryBtn');
+    const errorCancelBtn      = document.getElementById('errorCancelBtn');
+    const translationSpinner  = translationOverlay.querySelector('.spinner');
 
     let abortRequested = false;
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    // Show the error panel inside the overlay; resolves true = Retry, false = Cancel
+    function askRetryOrCancel(batchNo, totalBatches, message) {
+        return new Promise(resolve => {
+            translationSpinner.style.display  = 'none';
+            abortTranslationBtn.style.display = 'none';
+            abortConfirm.classList.remove('visible');
+            translationErrorMsg.innerHTML =
+                `<strong>Batch ${batchNo} of ${totalBatches} failed</strong><br>${escapeHtml(message)}`;
+            translationError.classList.add('visible');
+
+            const finish = retry => {
+                errorRetryBtn.removeEventListener('click', onRetry);
+                errorCancelBtn.removeEventListener('click', onCancel);
+                translationError.classList.remove('visible');
+                translationSpinner.style.display  = '';
+                abortTranslationBtn.style.display = '';
+                resolve(retry);
+            };
+            const onRetry  = () => finish(true);
+            const onCancel = () => finish(false);
+            errorRetryBtn.addEventListener('click', onRetry);
+            errorCancelBtn.addEventListener('click', onCancel);
+            errorRetryBtn.focus();
+        });
+    }
+
+    // Send one batch to the configured provider; returns { text, tokens }
+    async function translateBatch(cfg, prompt) {
+        const { provider, apiKey, model } = cfg;
+        if (provider === 'openai') {
+            const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] })
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err?.error?.message || `${res.status} ${res.statusText}`);
+            }
+            const data = await res.json();
+            const text = data?.choices?.[0]?.message?.content;
+            if (!text) throw new Error('Empty response from API.');
+            return { text, tokens: data.usage?.total_tokens || 0 };
+        }
+        // Gemini (default)
+        const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+            }
+        );
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err?.error?.message || `${res.status} ${res.statusText}`);
+        }
+        const data = await res.json();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error('Empty response from API.');
+        return { text, tokens: data.usageMetadata?.totalTokenCount || 0 };
+    }
 
     abortTranslationBtn.addEventListener('click', () => {
         abortTranslationBtn.style.display = 'none';
@@ -967,11 +1083,13 @@
 
         updateOverlay(0, batches.length, 0);
 
-        try {
-            const assembledParts = [];
+        const assembledParts = [];
+        let cancelled = false;
 
+        try {
+            batchLoop:
             for (let i = 0; i < batches.length; i++) {
-                const batch   = batches[i];
+                const batch    = batches[i];
                 const stripped = buildStripped(batch);
 
                 const prompt =
@@ -981,63 +1099,42 @@
                     `Do not add any commentary, code fences, or extra text.\n\n` +
                     stripped;
 
-                let translatedText, batchTokens;
-                const { provider, apiKey, model } = cfg;
-
-                if (provider === 'openai') {
-                    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${apiKey}`
-                        },
-                        body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] })
-                    });
-                    if (!res.ok) {
-                        const err = await res.json().catch(() => ({}));
-                        throw new Error(err?.error?.message || res.statusText);
+                let result;
+                while (true) {
+                    try {
+                        result = await translateBatch(cfg, prompt);
+                        break;
+                    } catch (e) {
+                        if (abortRequested) break batchLoop;
+                        const retry = await askRetryOrCancel(i + 1, batches.length, e.message);
+                        if (!retry) { cancelled = true; break batchLoop; }
+                        updateOverlay(i, batches.length, totalTokens);
                     }
-                    const data = await res.json();
-                    translatedText = data?.choices?.[0]?.message?.content;
-                    if (!translatedText) throw new Error('Empty response from API.');
-                    batchTokens = data.usage?.total_tokens || 0;
-                } else {
-                    // Gemini (default)
-                    const res = await fetch(
-                        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-                        {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-                        }
-                    );
-                    if (!res.ok) {
-                        const err = await res.json().catch(() => ({}));
-                        throw new Error(err?.error?.message || res.statusText);
-                    }
-                    const data = await res.json();
-                    translatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-                    if (!translatedText) throw new Error('Empty response from API.');
-                    batchTokens = data.usageMetadata?.totalTokenCount || 0;
                 }
 
-                totalTokens += batchTokens;
-                assembledParts.push(reassembleSRT(batch, translatedText));
+                totalTokens += result.tokens;
+                assembledParts.push(reassembleSRT(batch, result.text));
                 updateOverlay(i + 1, batches.length, totalTokens);
 
                 if (abortRequested) break;
             }
 
-            const result = assembledParts.join('\n\n');
+            // Keep untranslated batches (original text) so nothing is lost on abort/cancel
+            const doneCount = assembledParts.length;
+            const remaining = batches.slice(doneCount)
+                .map(b => b.map(x => x.num + '\n' + (x.ts ? x.ts + '\n' : '') + x.textLines.join('\n')).join('\n\n'));
+
+            const result = assembledParts.concat(remaining).join('\n\n');
             memoBox.value = result;
             const lines = result.split('\n').length;
-            if (abortRequested) {
-                setStatus(`Translation aborted · ${assembledParts.length} of ${batches.length} batch(es) done · ${lines.toLocaleString()} lines · ${totalTokens.toLocaleString()} tokens used`);
+            if (cancelled || abortRequested) {
+                const verb = cancelled ? 'cancelled after error' : 'aborted';
+                setStatus(`Translation ${verb} · ${doneCount} of ${batches.length} batch(es) translated (rest left in original) · ${lines.toLocaleString()} lines · ${totalTokens.toLocaleString()} tokens used`);
             } else {
                 setStatus(`Translation complete · ${lines.toLocaleString()} lines · ${result.length.toLocaleString()} characters · ${totalTokens.toLocaleString()} tokens used`);
             }
         } catch (e) {
-            if (!abortRequested) alert(`Translation failed: ${e.message}`);
+            alert(`Translation failed: ${e.message}`);
         } finally {
             translationOverlay.classList.remove('active');
         }
