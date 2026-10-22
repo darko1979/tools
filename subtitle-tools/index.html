@@ -499,6 +499,13 @@
             </select>
         </div>
 
+        <div class="modal-field" id="aiServerUrlField" style="display:none;">
+            <label for="aiServerUrl">Server URL (optional)</label>
+            <input type="text" id="aiServerUrl" inputmode="url" autocomplete="off"
+                   placeholder="https://api.openai.com/v1">
+            <span style="font-size:11px;color:#888;">For OpenAI-compatible APIs. Leave empty to use OpenAI.</span>
+        </div>
+
         <div class="modal-field">
             <label for="aiApiKey" id="aiApiKeyLabel">API Key</label>
             <div class="key-row">
@@ -754,6 +761,21 @@
     const toggleKeyBtn       = document.getElementById('toggleKeyBtn');
     const loadModelsBtn      = document.getElementById('loadModelsBtn');
     const aiModelStatus      = document.getElementById('aiModelStatus');
+    const aiServerUrlField   = document.getElementById('aiServerUrlField');
+    const aiServerUrlInput   = document.getElementById('aiServerUrl');
+
+    const OPENAI_DEFAULT_URL = 'https://api.openai.com/v1';
+
+    // Base URL for OpenAI-compatible requests; falls back to the OpenAI server
+    function openAiBaseUrl(serverUrl) {
+        return (serverUrl || '').trim().replace(/\/+$/, '') || OPENAI_DEFAULT_URL;
+    }
+
+    function openAiHeaders(apiKey) {
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+        return headers;
+    }
 
     const PROVIDER_META = {
         gemini: { label: 'Gemini API Key', placeholder: 'AIza…' },
@@ -765,6 +787,7 @@
         const meta = PROVIDER_META[provider] || PROVIDER_META.gemini;
         aiApiKeyLabel.textContent = meta.label;
         aiApiKeyInput.placeholder = meta.placeholder;
+        aiServerUrlField.style.display = provider === 'openai' ? '' : 'none';
         aiModelSelect.innerHTML = '<option value="">— enter key and click Load —</option>';
         aiModelStatus.textContent = '';
     }
@@ -779,7 +802,7 @@
 
     // Grok uses a free-text model input (api.x.ai blocks browser CORS preflight).
     // Gemini and OpenAI support CORS and fetch their lists live.
-    async function fetchModels(provider, apiKey) {
+    async function fetchModels(provider, apiKey, serverUrl) {
         aiModelStatus.textContent = 'Loading models…';
         loadModelsBtn.disabled = true;
         try {
@@ -800,20 +823,19 @@
                     .filter(n => /^gemini-/i.test(n) && !/embed|imagen|tts|vision-only/i.test(n))
                     .sort();
             } else {
-                // OpenAI — supports browser CORS
-                const res = await fetch('https://api.openai.com/v1/models', {
-                    headers: { 'Authorization': `Bearer ${apiKey}` }
-                });
+                // OpenAI or OpenAI-compatible server (must allow browser CORS)
+                const baseUrl = openAiBaseUrl(serverUrl);
+                const res = await fetch(`${baseUrl}/models`, { headers: openAiHeaders(apiKey) });
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({}));
                     aiModelStatus.textContent = `Error: ${err?.error?.message || res.statusText}`;
                     return;
                 }
                 const data = await res.json();
-                models = (data.data || [])
-                    .map(m => m.id)
-                    .filter(id => /^gpt-/i.test(id))
-                    .sort();
+                models = (data.data || []).map(m => m.id);
+                // Only filter to GPT models on the official server; compatible servers use other names
+                if (baseUrl === OPENAI_DEFAULT_URL) models = models.filter(id => /^gpt-/i.test(id));
+                models.sort();
             }
             if (!models.length) { aiModelStatus.textContent = 'No compatible models found.'; return; }
             const currentVal = aiModelSelect.value;
@@ -834,13 +856,14 @@
         if (cfg.provider) aiProviderSelect.value = cfg.provider;
         updateProviderUI();
         aiApiKeyInput.value = cfg.apiKey || '';
+        aiServerUrlInput.value = cfg.serverUrl || '';
         aiApiKeyInput.type  = 'password';
         toggleKeyBtn.textContent = 'Show';
         aiSavedNote.textContent  = '';
         aiModelStatus.textContent = '';
         aiModalBackdrop.classList.add('open');
-        if (cfg.apiKey) {
-            await fetchModels(aiProviderSelect.value, cfg.apiKey);
+        if (cfg.apiKey || cfg.serverUrl) {
+            await fetchModels(aiProviderSelect.value, cfg.apiKey, cfg.serverUrl);
             if (cfg.model) aiModelSelect.value = cfg.model;
         }
         aiApiKeyInput.focus();
@@ -868,18 +891,23 @@
     });
 
     loadModelsBtn.addEventListener('click', () => {
+        const provider = aiProviderSelect.value;
         const key = aiApiKeyInput.value.trim();
-        if (!key) { aiModelStatus.textContent = 'Enter an API key first.'; return; }
-        fetchModels(aiProviderSelect.value, key);
+        const serverUrl = provider === 'openai' ? aiServerUrlInput.value.trim() : '';
+        // Custom OpenAI-compatible servers (e.g. local ones) may not need a key
+        if (!key && !serverUrl) { aiModelStatus.textContent = 'Enter an API key first.'; return; }
+        fetchModels(provider, key, serverUrl);
     });
 
     aiModalSave.addEventListener('click', () => {
         const provider = aiProviderSelect.value;
         const key = aiApiKeyInput.value.trim();
+        const serverUrl = provider === 'openai' ? aiServerUrlInput.value.trim().replace(/\/+$/, '') : '';
         const model = aiModelSelect.value;
-        if (!key)   { aiSavedNote.style.color = '#c62828'; aiSavedNote.textContent = 'API key is required.'; return; }
+        if (!key && !serverUrl) { aiSavedNote.style.color = '#c62828'; aiSavedNote.textContent = 'API key is required.'; return; }
         if (!model) { aiSavedNote.style.color = '#c62828'; aiSavedNote.textContent = 'Select a model first.'; return; }
         const cfg = { provider, apiKey: key, model };
+        if (serverUrl) cfg.serverUrl = serverUrl;
         localStorage.setItem(AI_STORAGE_KEY, JSON.stringify(cfg));
         aiSavedNote.style.color = '#2e7d32';
         aiSavedNote.textContent = 'Configuration saved.';
@@ -942,14 +970,11 @@
 
     // Send one batch to the configured provider; returns { text, tokens }
     async function translateBatch(cfg, prompt) {
-        const { provider, apiKey, model } = cfg;
+        const { provider, apiKey, model, serverUrl } = cfg;
         if (provider === 'openai') {
-            const res = await fetch('https://api.openai.com/v1/chat/completions', {
+            const res = await fetch(`${openAiBaseUrl(serverUrl)}/chat/completions`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`
-                },
+                headers: openAiHeaders(apiKey),
                 body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] })
             });
             if (!res.ok) {
@@ -995,12 +1020,13 @@
 
     translateBtn.addEventListener('click', () => {
         const cfg = loadAiConfig();
-        if (!cfg.apiKey || !cfg.model) {
+        if ((!cfg.apiKey && !cfg.serverUrl) || !cfg.model) {
             alert('⚠️ Please configure AI first using the ⚙ AI Configuration button.');
             return;
         }
         const providerLabels = { gemini: 'Google Gemini', openai: 'OpenAI' };
-        const providerLabel = providerLabels[cfg.provider] || cfg.provider || 'Gemini';
+        let providerLabel = providerLabels[cfg.provider] || cfg.provider || 'Gemini';
+        if (cfg.provider === 'openai' && cfg.serverUrl) providerLabel = `OpenAI-compatible (${cfg.serverUrl})`;
         document.getElementById('translateAiInfo').textContent =
             `Using ${providerLabel} · ${cfg.model}`;
         translateBackdrop.classList.add('open');
@@ -1051,7 +1077,7 @@
 
     translateStart.addEventListener('click', async () => {
         const cfg = loadAiConfig();
-        if (!cfg.apiKey || !cfg.model) { alert('AI not configured.'); return; }
+        if ((!cfg.apiKey && !cfg.serverUrl) || !cfg.model) { alert('AI not configured.'); return; }
 
         const srtText = memoBox.value;
         const blocks  = parseSRT(srtText);
