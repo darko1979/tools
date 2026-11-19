@@ -75,6 +75,21 @@
   figcaption span { overflow-wrap: anywhere; }
   figcaption a { color: var(--accent); white-space: nowrap; }
 
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .tab {
+    border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
+    background: transparent; color: var(--muted); margin-bottom: -1px; padding: 8px 16px;
+  }
+  .tab[aria-selected="true"] { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 600; }
+  .panel[hidden] { display: none; }
+  .server-row { margin: -8px 0 12px; }
+
+  .upload { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .upload input[type=file] { display: none; }
+  .upload .filename { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .preview { display: none; max-width: 100%; max-height: 260px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 10px; }
+  .preview.active { display: block; }
+
   dialog {
     border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text);
     width: min(480px, calc(100vw - 32px)); padding: 20px;
@@ -95,19 +110,45 @@
     </div>
   </header>
 
-  <textarea id="promptInput" placeholder="Describe the image… (Ctrl+Enter to generate)"></textarea>
-  <div class="row">
-    <button id="generateBtn" class="primary" type="button">Generate</button>
-    <span class="hint" id="serverHint"></span>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" type="button" id="tab-generate" aria-controls="panel-generate" aria-selected="true">Generate image</button>
+    <button class="tab" role="tab" type="button" id="tab-edit" aria-controls="panel-edit" aria-selected="false">Edit image</button>
   </div>
+  <div class="server-row hint" id="serverHint"></div>
 
-  <div class="marquee" id="marquee">
-    <div class="bar"></div>
-    <div class="label" id="marqueeLabel">Waiting…</div>
-  </div>
-  <div class="status" id="status"></div>
+  <!-- Generate image -->
+  <section class="panel" id="panel-generate" role="tabpanel" aria-labelledby="tab-generate">
+    <textarea id="genPrompt" placeholder="Describe the image… (Ctrl+Enter to generate)"></textarea>
+    <div class="row">
+      <button id="genBtn" class="primary" type="button">Generate</button>
+    </div>
+    <div class="marquee" id="genMarquee">
+      <div class="bar"></div>
+      <div class="label" id="genMarqueeLabel">Waiting…</div>
+    </div>
+    <div class="status" id="genStatus"></div>
+    <div class="results" id="genResults"></div>
+  </section>
 
-  <div class="results" id="results"></div>
+  <!-- Edit image -->
+  <section class="panel" id="panel-edit" role="tabpanel" aria-labelledby="tab-edit" hidden>
+    <div class="upload">
+      <input id="editFile" type="file" accept="image/*">
+      <button id="editUploadBtn" type="button">Choose image…</button>
+      <span class="filename" id="editFileName">No image selected</span>
+    </div>
+    <img class="preview" id="editPreview" alt="Selected input image">
+    <textarea id="editPrompt" placeholder="Describe the edit… (Ctrl+Enter to generate)"></textarea>
+    <div class="row">
+      <button id="editBtn" class="primary" type="button">Generate</button>
+    </div>
+    <div class="marquee" id="editMarquee">
+      <div class="bar"></div>
+      <div class="label" id="editMarqueeLabel">Waiting…</div>
+    </div>
+    <div class="status" id="editStatus"></div>
+    <div class="results" id="editResults"></div>
+  </section>
 </main>
 
 <dialog id="configDialog">
@@ -128,7 +169,7 @@
 
 <script>
 const CONFIG_KEY = "comfyui-generator-config";
-const PLACEHOLDER = "{{prompt}}";
+const TAB_KEY = "comfyui-tools-tab";
 const SEED_KEYS = new Set(["seed", "noise_seed", "sampling_mode.seed"]);
 const POLL_MS = 1000;
 const TIMEOUT_MS = 30 * 60 * 1000;
@@ -146,7 +187,7 @@ function loadConfig() {
 }
 function saveConfig(c) {
   try { localStorage.setItem(CONFIG_KEY, JSON.stringify(c)); }
-  catch (e) { setStatus("Could not save configuration: " + e.message, "error"); }
+  catch (e) { activePanel().setStatus("Could not save configuration: " + e.message, "error"); }
 }
 function refreshHint() {
   const c = loadConfig();
@@ -168,7 +209,7 @@ $("configDialog").addEventListener("close", () => {
 });
 
 // ---------- API helpers ----------
-async function api(path, { method = "GET", json, raw = false } = {}) {
+async function api(path, { method = "GET", json, form, raw = false } = {}) {
   const c = loadConfig();
   const headers = {};
   if (json !== undefined) headers["Content-Type"] = "application/json";
@@ -178,7 +219,8 @@ async function api(path, { method = "GET", json, raw = false } = {}) {
   try {
     res = await fetch(url, {
       method, headers,
-      body: json !== undefined ? JSON.stringify(json) : undefined,
+      // FormData sets its own multipart Content-Type with boundary
+      body: form !== undefined ? form : json !== undefined ? JSON.stringify(json) : undefined,
     });
   } catch (e) {
     throw new Error(`Network/CORS error calling ${path}: ${e.message}`);
@@ -192,31 +234,38 @@ async function api(path, { method = "GET", json, raw = false } = {}) {
   return text.trim() ? JSON.parse(text) : {};
 }
 
-const WORKFLOW_URL = "workflows/generate-image.json";
-let _workflowPromise = null;
+const _workflowCache = new Map();
 
-// Load the workflow template once; retry on the next call if loading failed.
-function loadWorkflow() {
-  if (!_workflowPromise) {
-    _workflowPromise = fetch(WORKFLOW_URL)
+// Load a workflow template once per URL; retry on the next call if loading failed.
+function loadWorkflow(workflowUrl) {
+  if (!_workflowCache.has(workflowUrl)) {
+    const p = fetch(workflowUrl)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .catch((e) => {
-        _workflowPromise = null;
-        throw new Error(`Could not load workflow from ${WORKFLOW_URL}: ${e.message}`);
+        _workflowCache.delete(workflowUrl);
+        const hint = location.protocol === "file:"
+          ? "\nThe page is opened as a local file, and browsers block loading files from file:// pages. Serve this folder over HTTP instead (e.g. `python -m http.server`) and open it via http://localhost."
+          : "";
+        throw new Error(`Could not load workflow from ${workflowUrl}: ${e.message}${hint}`);
       });
+    _workflowCache.set(workflowUrl, p);
   }
-  return _workflowPromise;
+  return _workflowCache.get(workflowUrl);
 }
 
-// Deep-copy the workflow, replacing {{prompt}} in every string and randomizing seeds.
-async function buildWorkflow(promptText) {
-  const template = await loadWorkflow();
+// Deep-copy the workflow, replacing every {{key}} placeholder in strings and randomizing seeds.
+async function buildWorkflow(workflowUrl, replacements) {
+  const template = await loadWorkflow(workflowUrl);
   const seed = Math.floor(Math.random() * 999_999_999_999_999);
+  const replaceAll = (s) => {
+    for (const [k, val] of Object.entries(replacements)) s = s.split(`{{${k}}}`).join(val);
+    return s;
+  };
   const walk = (v, key) => {
-    if (typeof v === "string") return v.split(PLACEHOLDER).join(promptText);
+    if (typeof v === "string") return replaceAll(v);
     if (typeof v === "number" && SEED_KEYS.has(key)) return seed;
     if (Array.isArray(v)) return v.map((x) => walk(x));
     if (v && typeof v === "object") {
@@ -258,6 +307,16 @@ function collectImages(entry) {
   return saved.length ? saved : images;
 }
 
+// Upload an input image to ComfyUI; returns the name to use in a LoadImage node.
+async function uploadImage(file) {
+  const form = new FormData();
+  form.append("image", file, file.name);
+  form.append("type", "input");
+  const r = await api("/upload/image", { method: "POST", form });
+  if (!r.name) throw new Error("Upload succeeded but no file name was returned.");
+  return r.subfolder ? `${r.subfolder}/${r.name}` : r.name;
+}
+
 async function downloadImage(img) {
   const q = new URLSearchParams({ filename: img.filename, subfolder: img.subfolder || "", type: img.type || "output" });
   const res = await api(`/view?${q}`, { raw: true });
@@ -278,71 +337,135 @@ async function cleanup(images, promptId) {
 }
 
 // ---------- UI ----------
-function setStatus(text, kind = "") { const s = $("status"); s.textContent = text; s.className = "status " + kind; }
-function setBusy(busy, label = "") {
-  $("generateBtn").disabled = busy;
-  $("marquee").classList.toggle("active", busy);
-  $("marqueeLabel").textContent = label;
+// One panel per tab; `prefix` selects its element ids (genBtn, genPrompt, …).
+function makePanel(prefix) {
+  const el = (name) => $(prefix + name);
+  return {
+    prompt: el("Prompt"),
+    button: el("Btn"),
+    setStatus(text, kind = "") { const s = el("Status"); s.textContent = text; s.className = "status " + kind; },
+    setBusy(busy, label = "") {
+      el("Btn").disabled = busy;
+      el("Marquee").classList.toggle("active", busy);
+      el("MarqueeLabel").textContent = label;
+    },
+    addResult(blob, caption, filename) {
+      const url = URL.createObjectURL(blob);
+      const fig = document.createElement("figure");
+      const img = document.createElement("img");
+      img.src = url; img.alt = caption;
+      const cap = document.createElement("figcaption");
+      const text = document.createElement("span");
+      text.textContent = caption;
+      const a = document.createElement("a");
+      a.href = url; a.download = filename; a.textContent = "Download";
+      cap.append(text, a);
+      fig.append(img, cap);
+      el("Results").prepend(fig);
+    },
+  };
 }
 
-function addResult(blob, promptText, seed, filename) {
-  const url = URL.createObjectURL(blob);
-  const fig = document.createElement("figure");
-  const img = document.createElement("img");
-  img.src = url; img.alt = promptText;
-  const cap = document.createElement("figcaption");
-  const text = document.createElement("span");
-  text.textContent = `${promptText} — seed ${seed}`;
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.textContent = "Download";
-  cap.append(text, a);
-  fig.append(img, cap);
-  $("results").prepend(fig);
-}
+const panels = { generate: makePanel("gen"), edit: makePanel("edit") };
+let activeTab = "generate";
+const activePanel = () => panels[activeTab];
 
-async function generate() {
-  const promptText = $("promptInput").value.trim();
-  if (!promptText) { setStatus("Enter a prompt first.", "warn"); return; }
+function selectTab(name) {
+  if (!panels[name]) name = "generate";
+  activeTab = name;
+  for (const t of Object.keys(panels)) {
+    $("tab-" + t).setAttribute("aria-selected", String(t === name));
+    $("panel-" + t).hidden = t !== name;
+  }
+  try { localStorage.setItem(TAB_KEY, name); } catch {}
+}
+for (const t of Object.keys(panels)) $("tab-" + t).addEventListener("click", () => selectTab(t));
+
+// Shared pipeline: optional pre-step (e.g. upload), queue, wait, download, clean up.
+async function runWorkflow(panel, { workflowUrl, promptText, prepare }) {
+  if (!promptText) { panel.setStatus("Enter a prompt first.", "warn"); return; }
   const c = loadConfig();
-  if (!c.url) { setStatus("Set the base URL in Configuration first.", "warn"); openConfig(); return; }
+  if (!c.url) { panel.setStatus("Set the base URL in Configuration first.", "warn"); openConfig(); return; }
 
-  setStatus("");
-  setBusy(true, "Queuing prompt…");
+  panel.setStatus("");
+  panel.setBusy(true, "Preparing…");
   try {
-    const { workflow, seed } = await buildWorkflow(promptText);
+    const extra = prepare ? await prepare((label) => panel.setBusy(true, label)) : {};
+    panel.setBusy(true, "Queuing prompt…");
+    const { workflow, seed } = await buildWorkflow(workflowUrl, { prompt: promptText, ...extra });
     const queued = await api("/prompt", { method: "POST", json: { prompt: workflow, client_id: crypto.randomUUID() } });
     if (queued.node_errors && Object.keys(queued.node_errors).length) {
       throw new Error("Node errors:\n" + JSON.stringify(queued.node_errors, null, 2));
     }
     const promptId = queued.prompt_id;
 
-    const entry = await waitForResult(promptId, (s) => setBusy(true, `Generating… ${s}s`));
+    const entry = await waitForResult(promptId, (s) => panel.setBusy(true, `Generating… ${s}s`));
     const images = collectImages(entry);
     if (!images.length) throw new Error("Finished, but no image was returned.");
 
-    setBusy(true, "Downloading image…");
+    panel.setBusy(true, "Downloading image…");
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     for (const [i, img] of images.entries()) {
       const blob = await downloadImage(img);
       const ext = (img.filename.match(/\.[^.]+$/) || [".png"])[0];
-      addResult(blob, promptText, seed, `comfyui-${stamp}${i ? "_" + (i + 1) : ""}${ext}`);
+      panel.addResult(blob, `${promptText} — seed ${seed}`, `comfyui-${stamp}${i ? "_" + (i + 1) : ""}${ext}`);
     }
 
-    setBusy(true, "Removing from ComfyUI…");
+    panel.setBusy(true, "Removing from ComfyUI…");
     const problems = await cleanup(images, promptId);
-    if (problems.length) setStatus("Image saved, but cleanup had problems:\n" + problems.join("\n"), "warn");
+    if (problems.length) panel.setStatus("Image saved, but cleanup had problems:\n" + problems.join("\n"), "warn");
   } catch (e) {
-    setStatus(e.message, "error");
+    panel.setStatus(e.message, "error");
   } finally {
-    setBusy(false);
+    panel.setBusy(false);
   }
 }
 
-$("generateBtn").addEventListener("click", generate);
-$("promptInput").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); generate(); }
+// ---------- Generate image tab ----------
+function generateImage() {
+  return runWorkflow(panels.generate, {
+    workflowUrl: "workflows/generate-image.json",
+    promptText: panels.generate.prompt.value.trim(),
+  });
+}
+
+// ---------- Edit image tab ----------
+let editFile = null;
+let editPreviewUrl = null;
+$("editUploadBtn").addEventListener("click", () => $("editFile").click());
+$("editFile").addEventListener("change", () => {
+  editFile = $("editFile").files[0] || null;
+  if (editPreviewUrl) URL.revokeObjectURL(editPreviewUrl);
+  editPreviewUrl = editFile ? URL.createObjectURL(editFile) : null;
+  $("editFileName").textContent = editFile ? editFile.name : "No image selected";
+  $("editPreview").src = editPreviewUrl || "";
+  $("editPreview").classList.toggle("active", !!editFile);
 });
 
+function editImage() {
+  const panel = panels.edit;
+  if (!editFile) { panel.setStatus("Choose an image first.", "warn"); return; }
+  const file = editFile;
+  return runWorkflow(panel, {
+    workflowUrl: "workflows/image-edit.json",
+    promptText: panel.prompt.value.trim(),
+    prepare: async (label) => {
+      label("Uploading image…");
+      return { image: await uploadImage(file) };
+    },
+  });
+}
+
+// ---------- wiring ----------
+const actions = { generate: generateImage, edit: editImage };
+for (const [name, panel] of Object.entries(panels)) {
+  panel.button.addEventListener("click", actions[name]);
+  panel.prompt.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); actions[name](); }
+  });
+}
+
+try { selectTab(localStorage.getItem(TAB_KEY) || "generate"); } catch { selectTab("generate"); }
 refreshHint();
 if (!loadConfig().url) openConfig();
 </script>
