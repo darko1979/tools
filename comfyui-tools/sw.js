@@ -1,9 +1,10 @@
 'use strict';
 
-const CACHE_NAME = '1.0.0';
+const CACHE_NAME = '1.0.1';
 const CORE_ASSETS = [
     './index.html',
     './manifest.json',
+    './workflows/generate-image.json',
     './icons/icon.svg'
 ];
 
